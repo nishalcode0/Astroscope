@@ -1,0 +1,47 @@
+# Python environment
+.venv/
+env/
+venv/
+ENV/
+
+# Python byte-code / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Testing & Linting
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging & Distribution
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+
+# IDE & Editor metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Astronomical Data (ignore raw datasets, processed files, and local catalogs)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/catalogs/*
+!data/catalogs/.gitkeep
