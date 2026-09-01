@@ -238,3 +238,29 @@ def query_hst_observation_by_id(obs_id: str) -> Table:
         raise MastQueryError(
             f"MAST get_observation_metadata query failed for obs_id={obs_id!r}: {exc}"
         ) from exc
+
+
+def download_file(data_uri: str, local_path: str) -> None:
+    """Download a single MAST product by its URI.
+
+    Parameters
+    ----------
+    data_uri:
+        The MAST product URI (e.g. ``"mast:HST/product/n4eya1020_mos.fits"``).
+    local_path:
+        The local filesystem path where the file should be saved.
+
+    Raises
+    ------
+    MastQueryError
+        If the download fails due to network or MAST issues.
+    """
+    log.info("MAST download: uri=%r -> %r", data_uri, local_path)
+    try:
+        Observations.download_file(data_uri, local_path=local_path)
+    except MastQueryError:
+        raise
+    except Exception as exc:
+        raise MastQueryError(
+            f"MAST download failed for uri={data_uri!r}: {exc}"
+        ) from exc
