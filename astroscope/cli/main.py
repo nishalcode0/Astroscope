@@ -6,6 +6,8 @@ from typing import List, Optional
 
 from astroscope.archive.hubble import HubbleAdapter
 from astroscope.ingestion.core import ingest_product
+from astroscope.processing.core import load_science_image, compute_statistics, ProcessingError
+from pathlib import Path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,9 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Subcommand: process
-    subparsers.add_parser(
+    process_parser = subparsers.add_parser(
         "process",
         help="Process and calibrate raw astronomical observations",
+    )
+    process_parser.add_argument(
+        "--input",
+        required=True,
+        help="Path to the raw FITS file to process",
     )
 
     # Subcommand: analyze
@@ -117,7 +124,35 @@ def main(args: Optional[List[str]] = None) -> int:
             print(f"Ingestion failed: {e}")
             return 1
 
-    if parsed_args.command in ("discover", "process", "analyze", "candidates"):
+    if parsed_args.command == "process":
+        input_path = Path(parsed_args.input)
+        print(f"Loading science image from {input_path}...")
+        try:
+            image = load_science_image(input_path)
+            stats = compute_statistics(image)
+
+            print(f"Mission: {image.header.get('TELESCOP', 'Unknown')}")
+            print(f"Instrument: {image.header.get('INSTRUME', 'Unknown')}")
+            print(f"Filter: {image.header.get('FILTER', 'Unknown')}")
+            print("-" * 40)
+            print("Image Statistics:")
+            print(f"  Shape: {stats.shape}")
+            print(f"  Finite pixels: {stats.finite_pixels}")
+            print(f"  NaN/Masked pixels: {stats.nan_pixels}")
+            if stats.finite_pixels > 0:
+                print(f"  Min: {stats.min_val:.4g}")
+                print(f"  Max: {stats.max_val:.4g}")
+                print(f"  Mean: {stats.mean_val:.4g}")
+                print(f"  Median: {stats.median_val:.4g}")
+                print(f"  Std Dev: {stats.std_val:.4g}")
+            else:
+                print("  No finite pixels found in the image.")
+            return 0
+        except ProcessingError as e:
+            print(f"Error: {e}")
+            return 1
+
+    if parsed_args.command in ("discover", "analyze", "candidates"):
         print(f"Astroscope: Command '{parsed_args.command}' is not implemented yet in Session 1.")
         return 0
 

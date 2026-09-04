@@ -21,7 +21,7 @@ def test_cli_help(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_cli_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
     """Verify CLI subcommands output clear not-implemented messaging."""
-    subcommands = ["discover", "process", "analyze", "candidates"]
+    subcommands = ["discover", "analyze", "candidates"]
     for cmd in subcommands:
         exit_code = main([cmd])
         assert exit_code == 0
@@ -81,3 +81,57 @@ def test_cli_ingest_success(mock_ingest, mock_adapter_class, capsys: pytest.Capt
     mock_ingest.assert_called_once_with(mock_product, mock_obs)
     captured = capsys.readouterr()
     assert "Saved to /tmp/fake/path.fits" in captured.out
+
+
+def test_cli_process_missing_input(capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify process command requires --input."""
+    with pytest.raises(SystemExit) as exc_info:
+        main(["process"])
+    assert exc_info.value.code == 2
+
+
+@patch("astroscope.cli.main.compute_statistics")
+@patch("astroscope.cli.main.load_science_image")
+def test_cli_process_success(mock_load, mock_compute, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify successful processing outputs correct stats."""
+    mock_image = MagicMock()
+    mock_image.header = {'TELESCOP': 'HST', 'INSTRUME': 'NICMOS', 'FILTER': 'F160W'}
+    mock_load.return_value = mock_image
+
+    mock_stats = MagicMock()
+    mock_stats.shape = (10, 10)
+    mock_stats.finite_pixels = 100
+    mock_stats.nan_pixels = 0
+    mock_stats.min_val = 1.0
+    mock_stats.max_val = 10.0
+    mock_stats.mean_val = 5.0
+    mock_stats.median_val = 5.0
+    mock_stats.std_val = 2.0
+    mock_compute.return_value = mock_stats
+
+    exit_code = main(["process", "--input", "fake.fits"])
+
+    assert exit_code == 0
+    mock_load.assert_called_once()
+    mock_compute.assert_called_once_with(mock_image)
+
+    captured = capsys.readouterr()
+    assert "Loading science image from fake.fits..." in captured.out
+    assert "Mission: HST" in captured.out
+    assert "Instrument: NICMOS" in captured.out
+    assert "Filter: F160W" in captured.out
+    assert "Shape: (10, 10)" in captured.out
+    assert "Finite pixels: 100" in captured.out
+
+
+@patch("astroscope.cli.main.load_science_image")
+def test_cli_process_error(mock_load, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify processing errors are handled cleanly."""
+    from astroscope.processing.core import ProcessingError
+    mock_load.side_effect = ProcessingError("Invalid file")
+
+    exit_code = main(["process", "--input", "fake.fits"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Error: Invalid file" in captured.out
