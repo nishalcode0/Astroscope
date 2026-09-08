@@ -45,3 +45,15 @@ class ScienceImage:
         if not np.issubdtype(self.data.dtype, np.floating):
             # Enforce floating point data for scientific accuracy (NaN handling)
             self.data = self.data.astype(np.float32)
+
+@dataclass(frozen=True)
+class Source:
+    """Measured properties of a detected astronomical source."""
+
+    source_id: int
+    x_centroid: float
+    y_centroid: float
+    pixel_count: int
+    peak_signal: float
+    total_signal: float
+    peak_snr: float
