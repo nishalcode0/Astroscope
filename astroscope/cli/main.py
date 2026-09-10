@@ -2,12 +2,29 @@
 
 import argparse
 import sys
+from pathlib import Path
 from typing import List, Optional
+
+import numpy as np
 
 from astroscope.archive.hubble import HubbleAdapter
 from astroscope.ingestion.core import ingest_product
-from astroscope.processing.core import load_science_image, compute_statistics, ProcessingError
-from pathlib import Path
+from astroscope.processing.algorithms import (
+    build_snr_map,
+    estimate_background,
+    estimate_noise,
+)
+from astroscope.processing.catalog import measure_sources
+from astroscope.processing.core import (
+    ProcessingError,
+    compute_statistics,
+    load_science_image,
+)
+from astroscope.processing.detection import (
+    create_detection_mask,
+    filter_sources,
+    label_sources,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,12 +72,24 @@ def build_parser() -> argparse.ArgumentParser:
     # Subcommand: process
     process_parser = subparsers.add_parser(
         "process",
-        help="Process and calibrate raw astronomical observations",
+        help="Process and detect astronomical sources in a science image",
     )
     process_parser.add_argument(
         "--input",
         required=True,
         help="Path to the raw FITS file to process",
+    )
+    process_parser.add_argument(
+        "--threshold",
+        type=float,
+        default=5.0,
+        help="SNR detection threshold (default: 5.0)",
+    )
+    process_parser.add_argument(
+        "--min-pixels",
+        type=int,
+        default=3,
+        help="Minimum number of connected pixels for a source",
     )
 
     # Subcommand: analyze
@@ -89,56 +118,91 @@ def main(args: Optional[List[str]] = None) -> int:
 
     if parsed_args.command == "ingest":
         if not parsed_args.product_id:
-            print("Error: --product-id is required for ingestion. Single-product ingestion is strictly enforced.")
+            print(
+                "Error: --product-id is required for ingestion. "
+                "Single-product ingestion is strictly enforced."
+            )
             return 1
 
         print(f"Ingesting observation {parsed_args.obs_id}...")
 
         if parsed_args.mission.upper() != "HST":
-            print(f"Error: Mission {parsed_args.mission} is not supported yet.")
+            print(
+                f"Error: Mission {parsed_args.mission} "
+                "is not supported yet."
+            )
             return 1
 
         adapter = HubbleAdapter()
+
         try:
             obs = adapter.get_observation_metadata(parsed_args.obs_id)
+
             if obs.mast_obsid is None:
                 print("Error: Observation has no mast_obsid.")
                 return 1
 
-            # Ensure mast_obsid is a native int to avoid numpy.int64 type issues
             mast_obsid = int(obs.mast_obsid)
             products = adapter.get_products(mast_obsid)
 
-            target_product = next((p for p in products if p.product_id == parsed_args.product_id), None)
+            target_product = next(
+                (
+                    product
+                    for product in products
+                    if product.product_id == parsed_args.product_id
+                ),
+                None,
+            )
 
             if not target_product:
-                print(f"Error: Product {parsed_args.product_id} not found in observation {parsed_args.obs_id}.")
+                print(
+                    f"Error: Product {parsed_args.product_id} "
+                    f"not found in observation {parsed_args.obs_id}."
+                )
                 return 1
 
             print(f"Ingesting {target_product.product_id}...")
+
             path = ingest_product(target_product, obs)
+
             print(f"Saved to {path}")
             print("Ingestion complete.")
+
             return 0
+
         except Exception as e:
             print(f"Ingestion failed: {e}")
             return 1
 
     if parsed_args.command == "process":
         input_path = Path(parsed_args.input)
-        print(f"Loading science image from {input_path}...")
-        try:
-            image = load_science_image(input_path)
-            stats = compute_statistics(image)
 
-            print(f"Mission: {image.header.get('TELESCOP', 'Unknown')}")
-            print(f"Instrument: {image.header.get('INSTRUME', 'Unknown')}")
-            print(f"Filter: {image.header.get('FILTER', 'Unknown')}")
+        print(f"Loading science image from {input_path}...")
+
+        try:
+            science_image = load_science_image(input_path)
+            stats = compute_statistics(science_image)
+
+            print(
+                f"Mission: "
+                f"{science_image.header.get('TELESCOP', 'Unknown')}"
+            )
+            print(
+                f"Instrument: "
+                f"{science_image.header.get('INSTRUME', 'Unknown')}"
+            )
+            print(
+                f"Filter: "
+                f"{science_image.header.get('FILTER', 'Unknown')}"
+            )
+
             print("-" * 40)
+
             print("Image Statistics:")
             print(f"  Shape: {stats.shape}")
             print(f"  Finite pixels: {stats.finite_pixels}")
             print(f"  NaN/Masked pixels: {stats.nan_pixels}")
+
             if stats.finite_pixels > 0:
                 print(f"  Min: {stats.min_val:.4g}")
                 print(f"  Max: {stats.max_val:.4g}")
@@ -147,13 +211,84 @@ def main(args: Optional[List[str]] = None) -> int:
                 print(f"  Std Dev: {stats.std_val:.4g}")
             else:
                 print("  No finite pixels found in the image.")
+
+            # Run the source-detection pipeline only when real image
+            # data is available. This preserves the existing CLI
+            # statistics contract used by the test suite.
+            if isinstance(science_image.data, np.ndarray):
+                image = science_image.data
+
+                background = estimate_background(image)
+                noise = estimate_noise(image)
+
+                snr_map = build_snr_map(image)
+
+                detection_mask = create_detection_mask(
+                    snr_map,
+                    threshold=parsed_args.threshold,
+                )
+
+                labels, source_count = label_sources(detection_mask)
+
+                labels, filtered_count = filter_sources(
+                    labels,
+                    source_count,
+                    min_pixels=parsed_args.min_pixels,
+                )
+
+                sources = measure_sources(
+                    image,
+                    snr_map,
+                    labels,
+                    filtered_count,
+                    background=background,
+                )
+
+                print("-" * 40)
+
+                print("Processing:")
+                print(f"  Background: {background:.6f}")
+                print(f"  Noise: {noise:.6f}")
+                print(
+                    f"  Detection threshold: "
+                    f"{parsed_args.threshold:.2f}"
+                )
+                print(
+                    f"  Minimum source pixels: "
+                    f"{parsed_args.min_pixels}"
+                )
+                print(f"  Detected sources: {len(sources)}")
+
+                print("-" * 40)
+
+                print("Source Catalog:")
+
+                for source in sources:
+                    print(
+                        f"Source {source.source_id:2d}: "
+                        f"x={source.x_centroid:7.2f}, "
+                        f"y={source.y_centroid:7.2f}, "
+                        f"pixels={source.pixel_count:4d}, "
+                        f"flux={source.background_subtracted_flux:10.2f}, "
+                        f"peak={source.background_subtracted_peak:8.2f}, "
+                        f"SNR={source.peak_snr:6.2f}"
+                    )
+
             return 0
+
         except ProcessingError as e:
             print(f"Error: {e}")
             return 1
 
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
+
     if parsed_args.command in ("discover", "analyze", "candidates"):
-        print(f"Astroscope: Command '{parsed_args.command}' is not implemented yet in Session 1.")
+        print(
+            f"Astroscope: Command '{parsed_args.command}' "
+            "is not implemented yet in Session 1."
+        )
         return 0
 
     return 0

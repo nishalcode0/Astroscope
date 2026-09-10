@@ -15,6 +15,7 @@ def create_detection_mask(
 
     return np.isfinite(snr_map) & (snr_map >= threshold)
 
+
 def label_sources(
     detection_mask: np.ndarray,
 ) -> tuple[np.ndarray, int]:
@@ -69,3 +70,51 @@ def label_sources(
                         stack.append((ny, nx))
 
     return labels, current_label
+
+
+def filter_sources(
+    labels: np.ndarray,
+    source_count: int,
+    min_pixels: int = 3,
+) -> tuple[np.ndarray, int]:
+    """
+    Remove detected regions smaller than the minimum pixel count.
+
+    Parameters
+    ----------
+    labels : np.ndarray
+        Integer label map produced by label_sources().
+    source_count : int
+        Number of labeled sources.
+    min_pixels : int
+        Minimum number of pixels required for a source to remain.
+
+    Returns
+    -------
+    filtered_labels : np.ndarray
+        Label map containing only sources that pass the size criterion.
+        Labels are renumbered consecutively starting from 1.
+    count : int
+        Number of surviving sources.
+    """
+    if min_pixels <= 0:
+        raise ValueError("min_pixels must be greater than zero.")
+
+    if labels.ndim != 2:
+        raise ValueError("Labels must be a 2D array.")
+
+    filtered_labels = np.zeros_like(labels, dtype=np.int32)
+
+    new_label = 0
+
+    for source_id in range(1, source_count + 1):
+        pixels = labels == source_id
+        pixel_count = int(np.count_nonzero(pixels))
+
+        if pixel_count < min_pixels:
+            continue
+
+        new_label += 1
+        filtered_labels[pixels] = new_label
+
+    return filtered_labels, new_label

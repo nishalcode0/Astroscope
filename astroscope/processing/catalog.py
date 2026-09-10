@@ -10,6 +10,7 @@ def measure_source(
     snr_map: np.ndarray,
     labels: np.ndarray,
     source_id: int,
+    background: float = 0.0,
 ) -> Source:
     """
     Measure the properties of one detected astronomical source.
@@ -36,14 +37,32 @@ def measure_source(
     values = values[finite]
     snr_values = snr_values[finite]
 
+    corrected_values = values - background
+    total_signal = float(np.sum(values))
+    corrected_flux = float(np.sum(corrected_values))
+
+    if corrected_flux <= 0:
+        raise ValueError(
+            f"Source {source_id} has non-positive background-subtracted flux."
+        )
+
+    x_centroid = float(
+        np.sum(x * corrected_values) / corrected_flux
+    )
+    y_centroid = float(
+        np.sum(y * corrected_values) / corrected_flux
+    )
+
     return Source(
         source_id=source_id,
-        x_centroid=float(np.mean(x)),
-        y_centroid=float(np.mean(y)),
+        x_centroid=x_centroid,
+        y_centroid=y_centroid,
         pixel_count=int(len(values)),
         peak_signal=float(np.max(values)),
-        total_signal=float(np.sum(values)),
+        total_signal=total_signal,
         peak_snr=float(np.max(snr_values)),
+        background_subtracted_peak=float(np.max(corrected_values)),
+        background_subtracted_flux=corrected_flux,
     )
 
 
@@ -52,6 +71,7 @@ def measure_sources(
     snr_map: np.ndarray,
     labels: np.ndarray,
     source_count: int,
+    background: float = 0.0,
 ) -> list[Source]:
     """
     Measure all detected astronomical sources.
@@ -64,6 +84,7 @@ def measure_sources(
             snr_map,
             labels,
             source_id,
+            background=background,
         )
         sources.append(source)
 

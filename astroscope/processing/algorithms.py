@@ -1,12 +1,12 @@
-from __future__ import annotations 
+from __future__ import annotations
 
-import numpy as np 
+import numpy as np
+
 
 def estimate_background(image: np.ndarray) -> float:
     """
     Estimate the background signal using the median of finite pixels.
     """
-
     finite_pixels = image[np.isfinite(image)]
 
     if finite_pixels.size == 0:
@@ -15,19 +15,22 @@ def estimate_background(image: np.ndarray) -> float:
     return float(np.median(finite_pixels))
 
 
-
 def subtract_background(
-        image: np.ndarray,
-        background: float,
+    image: np.ndarray,
+    background: float,
 ) -> np.ndarray:
     """
     Subtract a scalar background estimate from an image.
     """
     return image - background
 
+
 def estimate_noise(image: np.ndarray) -> float:
     """
     Estimate image noise using the median absolute deviation (MAD).
+
+    The factor 1.4826 converts MAD to an estimate of the standard
+    deviation for approximately normally distributed noise.
     """
     finite_pixels = image[np.isfinite(image)]
 
@@ -37,7 +40,13 @@ def estimate_noise(image: np.ndarray) -> float:
     median = np.median(finite_pixels)
     mad = np.median(np.abs(finite_pixels - median))
 
-    return float(1.4826 * mad)
+    noise = 1.4826 * mad
+
+    if noise <= 0:
+        raise ValueError("Estimated image noise must be greater than zero.")
+
+    return float(noise)
+
 
 def calculate_snr(signal: float, noise: float) -> float:
     """
@@ -48,6 +57,7 @@ def calculate_snr(signal: float, noise: float) -> float:
 
     return float(signal / noise)
 
+
 def calculate_snr_map(
     image: np.ndarray,
     background: float,
@@ -55,6 +65,9 @@ def calculate_snr_map(
 ) -> np.ndarray:
     """
     Convert an image into a signal-to-noise ratio map.
+
+    Each pixel is background-subtracted and divided by the
+    estimated noise level.
     """
     if noise <= 0:
         raise ValueError("Noise must be greater than zero.")
@@ -62,12 +75,18 @@ def calculate_snr_map(
     signal = image - background
     return signal / noise
 
+
 def build_snr_map(image: np.ndarray) -> np.ndarray:
     """
     Build a signal-to-noise ratio map from a science image.
+
+    Background and noise are estimated directly from the input image.
     """
     background = estimate_background(image)
-    corrected = subtract_background(image, background)
     noise = estimate_noise(image)
 
-    return calculate_snr_map(corrected, 0.0, noise)
+    return calculate_snr_map(
+        image,
+        background,
+        noise,
+    )

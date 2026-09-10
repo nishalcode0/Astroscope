@@ -57,3 +57,5 @@ class Source:
     peak_signal: float
     total_signal: float
     peak_snr: float
+    background_subtracted_peak: float
+    background_subtracted_flux: float
