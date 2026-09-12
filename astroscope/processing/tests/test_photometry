@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from astroscope.processing.catalog import measure_aperture_fluxes
+from astroscope.processing.models import Source
+from astroscope.processing.photometry import (
+    aperture_flux,
+    aperture_mask,
+    aperture_pixel_count,
+)
+
+
+def test_aperture_mask_center() -> None:
+    """Verify that a circular aperture is centered correctly."""
+    mask = aperture_mask(
+        image_shape=(11, 11),
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    assert mask.shape == (11, 11)
+    assert mask[5, 5]
+    assert not mask[0, 0]
+
+
+def test_aperture_mask_is_boolean() -> None:
+    """Verify that the aperture mask contains boolean values."""
+    mask = aperture_mask(
+        image_shape=(10, 10),
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    assert mask.dtype == np.bool_
+
+
+def test_aperture_mask_radius_validation() -> None:
+    """Verify that a non-positive radius is rejected."""
+    with pytest.raises(ValueError, match="greater than zero"):
+        aperture_mask(
+            image_shape=(10, 10),
+            x_center=5.0,
+            y_center=5.0,
+            radius=0.0,
+        )
+
+
+def test_aperture_mask_2d_shape_validation() -> None:
+    """Verify that aperture masks require a 2D image shape."""
+    with pytest.raises(ValueError, match="2D"):
+        aperture_mask(
+            image_shape=(10,),
+            x_center=5.0,
+            y_center=5.0,
+            radius=2.0,
+        )
+
+
+def test_aperture_pixel_count() -> None:
+    """Verify that the number of pixels in an aperture is calculated."""
+    count = aperture_pixel_count(
+        image_shape=(11, 11),
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    assert count == 13
+
+
+def test_aperture_flux_without_background() -> None:
+    """Verify that aperture flux equals the sum of aperture pixels."""
+    image = np.zeros((11, 11), dtype=float)
+
+    mask = aperture_mask(
+        image.shape,
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    image[mask] = 10.0
+
+    flux = aperture_flux(
+        image,
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    assert flux == pytest.approx(130.0)
+
+
+def test_aperture_flux_with_background() -> None:
+    """Verify that the background contribution is removed."""
+    image = np.full((11, 11), 2.0)
+
+    mask = aperture_mask(
+        image.shape,
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    image[mask] = 12.0
+
+    flux = aperture_flux(
+        image,
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+        background=2.0,
+    )
+
+    assert flux == pytest.approx(130.0)
+
+
+def test_aperture_flux_ignores_nan_pixels() -> None:
+    """Verify that non-finite aperture pixels are ignored."""
+    image = np.full((11, 11), 5.0)
+
+    mask = aperture_mask(
+        image.shape,
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    image[mask] = 10.0
+
+    aperture_indices = np.argwhere(mask)
+    y, x = aperture_indices[0]
+    image[y, x] = np.nan
+
+    flux = aperture_flux(
+        image,
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    assert flux == pytest.approx(120.0)
+
+
+def test_aperture_flux_requires_2d_image() -> None:
+    """Verify that aperture photometry requires a 2D image."""
+    image = np.zeros((5, 5, 2), dtype=float)
+
+    with pytest.raises(ValueError, match="2D"):
+        aperture_flux(
+            image,
+            x_center=2.0,
+            y_center=2.0,
+            radius=2.0,
+        )
+
+
+def test_aperture_flux_rejects_no_finite_pixels() -> None:
+    """Verify that an aperture containing no finite pixels is rejected."""
+    image = np.full((11, 11), np.nan)
+
+    with pytest.raises(ValueError, match="no finite pixels"):
+        aperture_flux(
+            image,
+            x_center=5.0,
+            y_center=5.0,
+            radius=2.0,
+        )
+
+
+def test_aperture_flux_rejects_non_positive_radius() -> None:
+    """Verify that aperture photometry rejects invalid radii."""
+    image = np.ones((10, 10), dtype=float)
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        aperture_flux(
+            image,
+            x_center=5.0,
+            y_center=5.0,
+            radius=0.0,
+        )
+
+
+def test_aperture_mask_near_image_edge() -> None:
+    """Verify that apertures near an image edge remain in bounds."""
+    mask = aperture_mask(
+        image_shape=(10, 10),
+        x_center=0.0,
+        y_center=0.0,
+        radius=2.0,
+    )
+
+    assert mask.shape == (10, 10)
+    assert mask[0, 0]
+    assert np.all(np.indices(mask.shape)[0] >= 0)
+
+
+def make_source(
+    source_id: int,
+    x: float = 5.0,
+    y: float = 5.0,
+) -> Source:
+    """Create a simple Source object for photometry tests."""
+    return Source(
+        source_id=source_id,
+        x_centroid=x,
+        y_centroid=y,
+        pixel_count=5,
+        peak_signal=25.0,
+        total_signal=100.0,
+        peak_snr=10.0,
+        background_subtracted_peak=23.0,
+        background_subtracted_flux=90.0,
+    )
+
+
+def test_measure_aperture_fluxes_returns_flux_for_each_source() -> None:
+    """Verify that aperture flux is measured for every source."""
+    image = np.zeros((11, 11), dtype=float)
+
+    mask = aperture_mask(
+        image.shape,
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    image[mask] = 10.0
+
+    sources = [
+        make_source(1, x=5.0, y=5.0),
+    ]
+
+    fluxes = measure_aperture_fluxes(
+        image=image,
+        sources=sources,
+        radius=2.0,
+    )
+
+    assert fluxes[1] == pytest.approx(130.0)
+
+
+def test_measure_aperture_fluxes_supports_multiple_sources() -> None:
+    """Verify that multiple sources receive independent aperture fluxes."""
+    image = np.zeros((15, 15), dtype=float)
+
+    first_mask = aperture_mask(
+        image.shape,
+        x_center=4.0,
+        y_center=4.0,
+        radius=1.0,
+    )
+
+    second_mask = aperture_mask(
+        image.shape,
+        x_center=10.0,
+        y_center=10.0,
+        radius=1.0,
+    )
+
+    image[first_mask] = 10.0
+    image[second_mask] = 20.0
+
+    sources = [
+        make_source(1, x=4.0, y=4.0),
+        make_source(2, x=10.0, y=10.0),
+    ]
+
+    fluxes = measure_aperture_fluxes(
+        image=image,
+        sources=sources,
+        radius=1.0,
+    )
+
+    assert fluxes[1] == pytest.approx(50.0)
+    assert fluxes[2] == pytest.approx(100.0)
+
+
+def test_measure_aperture_fluxes_subtracts_background() -> None:
+    """Verify that the aperture measurements subtract the supplied background."""
+    image = np.full((11, 11), 2.0)
+
+    mask = aperture_mask(
+        image.shape,
+        x_center=5.0,
+        y_center=5.0,
+        radius=2.0,
+    )
+
+    image[mask] = 12.0
+
+    sources = [
+        make_source(1, x=5.0, y=5.0),
+    ]
+
+    fluxes = measure_aperture_fluxes(
+        image=image,
+        sources=sources,
+        radius=2.0,
+        background=2.0,
+    )
+
+    assert fluxes[1] == pytest.approx(130.0)
+
+
+def test_measure_aperture_fluxes_rejects_invalid_radius() -> None:
+    """Verify that invalid aperture radii are rejected."""
+    image = np.ones((10, 10), dtype=float)
+    sources = [make_source(1)]
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        measure_aperture_fluxes(
+            image=image,
+            sources=sources,
+            radius=0.0,
+        )
+
+
+def test_measure_aperture_fluxes_supports_empty_catalog() -> None:
+    """Verify that an empty source catalog produces an empty result."""
+    image = np.ones((10, 10), dtype=float)
+
+    fluxes = measure_aperture_fluxes(
+        image=image,
+        sources=[],
+        radius=2.0,
+    )
+
+    assert fluxes == {}

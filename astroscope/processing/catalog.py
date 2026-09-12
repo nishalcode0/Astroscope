@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from astroscope.processing.models import Source
+from astroscope.processing.photometry import aperture_flux
 
 
 def measure_source(
@@ -43,12 +44,14 @@ def measure_source(
 
     if corrected_flux <= 0:
         raise ValueError(
-            f"Source {source_id} has non-positive background-subtracted flux."
+            f"Source {source_id} has non-positive "
+            "background-subtracted flux."
         )
 
     x_centroid = float(
         np.sum(x * corrected_values) / corrected_flux
     )
+
     y_centroid = float(
         np.sum(y * corrected_values) / corrected_flux
     )
@@ -89,3 +92,52 @@ def measure_sources(
         sources.append(source)
 
     return sources
+
+
+def measure_aperture_fluxes(
+    image: np.ndarray,
+    sources: list[Source],
+    radius: float,
+    background: float = 0.0,
+) -> dict[int, float]:
+    """
+    Measure circular-aperture flux for every detected source.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D science image.
+
+    sources : list[Source]
+        Detected and measured astronomical sources.
+
+    radius : float
+        Aperture radius in pixels.
+
+    background : float, optional
+        Background signal per pixel.
+
+    Returns
+    -------
+    dict[int, float]
+        Mapping from source ID to background-subtracted aperture flux.
+    """
+    if radius <= 0:
+        raise ValueError(
+            "Aperture radius must be greater than zero."
+        )
+
+    aperture_fluxes: dict[int, float] = {}
+
+    for source in sources:
+        flux = aperture_flux(
+            image=image,
+            x_center=source.x_centroid,
+            y_center=source.y_centroid,
+            radius=radius,
+            background=background,
+        )
+
+        aperture_fluxes[source.source_id] = flux
+
+    return aperture_fluxes

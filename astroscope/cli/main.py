@@ -25,6 +25,7 @@ from astroscope.processing.detection import (
     filter_sources,
     label_sources,
 )
+from astroscope.processing.export import export_sources_csv
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3,
         help="Minimum number of connected pixels for a source",
+    )
+    process_parser.add_argument(
+        "--output",
+        type=Path,
+        help="Optional path for exporting the detected source catalog as CSV",
     )
 
     # Subcommand: analyze
@@ -272,6 +278,17 @@ def main(args: Optional[List[str]] = None) -> int:
                         f"flux={source.background_subtracted_flux:10.2f}, "
                         f"peak={source.background_subtracted_peak:8.2f}, "
                         f"SNR={source.peak_snr:6.2f}"
+                    )
+
+                if parsed_args.output is not None:
+                    export_sources_csv(
+                        sources,
+                        parsed_args.output,
+                    )
+
+                    print("-" * 40)
+                    print(
+                        f"Catalog exported to {parsed_args.output}"
                     )
 
             return 0

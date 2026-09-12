@@ -40,11 +40,16 @@ class ScienceImage:
         """Validate the scientific data payload."""
         if not isinstance(self.data, np.ndarray):
             raise TypeError("ScienceImage data must be a numpy.ndarray.")
+
         if self.data.ndim != 2:
-            raise ValueError(f"ScienceImage requires 2D data, got {self.data.ndim}D.")
+            raise ValueError(
+                f"ScienceImage requires 2D data, got {self.data.ndim}D."
+            )
+
         if not np.issubdtype(self.data.dtype, np.floating):
             # Enforce floating point data for scientific accuracy (NaN handling)
             self.data = self.data.astype(np.float32)
+
 
 @dataclass(frozen=True)
 class Source:
@@ -59,3 +64,7 @@ class Source:
     peak_snr: float
     background_subtracted_peak: float
     background_subtracted_flux: float
+
+    # Circular-aperture photometry measurement.
+    # Default preserves compatibility with existing Source construction.
+    aperture_flux: float = 0.0
