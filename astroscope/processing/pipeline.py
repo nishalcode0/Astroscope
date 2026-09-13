@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -92,9 +92,23 @@ def process_image(
             background=background,
         )
 
+        # Source is frozen, so create new Source objects instead of
+        # modifying the existing instances in place.
         sources = [
-            replace(
-                source,
+            Source(
+                source_id=source.source_id,
+                x_centroid=source.x_centroid,
+                y_centroid=source.y_centroid,
+                pixel_count=source.pixel_count,
+                peak_signal=source.peak_signal,
+                total_signal=source.total_signal,
+                peak_snr=source.peak_snr,
+                background_subtracted_peak=(
+                    source.background_subtracted_peak
+                ),
+                background_subtracted_flux=(
+                    source.background_subtracted_flux
+                ),
                 aperture_flux=aperture_fluxes[source.source_id],
             )
             for source in sources
