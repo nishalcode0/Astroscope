@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional
 
@@ -14,7 +15,10 @@ from astroscope.processing.algorithms import (
     estimate_background,
     estimate_noise,
 )
-from astroscope.processing.catalog import measure_sources
+from astroscope.processing.catalog import (
+    measure_aperture_fluxes,
+    measure_sources,
+)
 from astroscope.processing.core import (
     ProcessingError,
     compute_statistics,
@@ -96,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         help="Optional path for exporting the detected source catalog as CSV",
+    )
+    process_parser.add_argument(
+        "--aperture-radius",
+        type=float,
+        help="Optional circular aperture radius in pixels",
     )
 
     # Subcommand: analyze
@@ -250,6 +259,25 @@ def main(args: Optional[List[str]] = None) -> int:
                     background=background,
                 )
 
+                # Optional aperture photometry.
+                if parsed_args.aperture_radius is not None:
+                    aperture_fluxes = measure_aperture_fluxes(
+                        image,
+                        sources,
+                        radius=parsed_args.aperture_radius,
+                        background=background,
+                    )
+
+                    # Source is frozen, so create new Source instances
+                    # instead of modifying the existing objects.
+                    sources = [
+                        replace(
+                            source,
+                            aperture_flux=aperture_fluxes[source.source_id],
+                        )
+                        for source in sources
+                    ]
+
                 print("-" * 40)
 
                 print("Processing:")
@@ -265,12 +293,18 @@ def main(args: Optional[List[str]] = None) -> int:
                 )
                 print(f"  Detected sources: {len(sources)}")
 
+                if parsed_args.aperture_radius is not None:
+                    print(
+                        f"  Aperture radius: "
+                        f"{parsed_args.aperture_radius:.2f} pixels"
+                    )
+
                 print("-" * 40)
 
                 print("Source Catalog:")
 
                 for source in sources:
-                    print(
+                    line = (
                         f"Source {source.source_id:2d}: "
                         f"x={source.x_centroid:7.2f}, "
                         f"y={source.y_centroid:7.2f}, "
@@ -279,6 +313,14 @@ def main(args: Optional[List[str]] = None) -> int:
                         f"peak={source.background_subtracted_peak:8.2f}, "
                         f"SNR={source.peak_snr:6.2f}"
                     )
+
+                    if parsed_args.aperture_radius is not None:
+                        line += (
+                            f", aperture_flux="
+                            f"{source.aperture_flux:10.2f}"
+                        )
+
+                    print(line)
 
                 if parsed_args.output is not None:
                     export_sources_csv(
