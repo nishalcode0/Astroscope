@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -9,7 +9,10 @@ from astroscope.processing.algorithms import (
     estimate_background,
     estimate_noise,
 )
-from astroscope.processing.catalog import measure_sources
+from astroscope.processing.catalog import (
+    measure_aperture_fluxes,
+    measure_sources,
+)
 from astroscope.processing.detection import (
     create_detection_mask,
     filter_sources,
@@ -34,6 +37,7 @@ def process_image(
     image: np.ndarray,
     threshold: float = 5.0,
     min_pixels: int = 3,
+    aperture_radius: float | None = None,
 ) -> ProcessingResult:
     """
     Run the complete source-detection pipeline on a science image.
@@ -47,6 +51,7 @@ def process_image(
         -> connected-component labeling
         -> source-size filtering
         -> source measurement
+        -> optional aperture photometry
     """
     if image.ndim != 2:
         raise ValueError(
@@ -78,6 +83,22 @@ def process_image(
         filtered_count,
         background=background,
     )
+
+    if aperture_radius is not None:
+        aperture_fluxes = measure_aperture_fluxes(
+            image,
+            sources,
+            radius=aperture_radius,
+            background=background,
+        )
+
+        sources = [
+            replace(
+                source,
+                aperture_flux=aperture_fluxes[source.source_id],
+            )
+            for source in sources
+        ]
 
     return ProcessingResult(
         background=background,

@@ -34,6 +34,7 @@ def export_sources_csv(
         "peak_snr",
         "background_subtracted_peak",
         "background_subtracted_flux",
+        "aperture_flux",
     ]
 
     with output_path.open(
@@ -64,5 +65,6 @@ def export_sources_csv(
                     "background_subtracted_flux": (
                         source.background_subtracted_flux
                     ),
+                    "aperture_flux": source.aperture_flux,
                 }
             )
