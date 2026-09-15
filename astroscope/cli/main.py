@@ -10,6 +10,7 @@ import numpy as np
 
 from astroscope.archive.hubble import HubbleAdapter
 from astroscope.ingestion.core import ingest_product
+from astroscope.inventory.core import InventoryError, LocalInventory
 from astroscope.processing.algorithms import (
     build_snr_map,
     estimate_background,
@@ -74,6 +75,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Mission to query (default: HST)",
     )
 
+    # Subcommand: inventory
+    inventory_parser = subparsers.add_parser(
+        "inventory",
+        help="List astronomical products currently available locally",
+    )
+    inventory_parser.add_argument(
+        "--mission",
+        help="Filter inventory by mission",
+    )
+    inventory_parser.add_argument(
+        "--obs-id",
+        help="Filter inventory by observation ID",
+    )
+
+    # Subcommand: show
+    show_parser = subparsers.add_parser(
+        "show",
+        help="Inspect a local astronomical science product",
+    )
+    show_parser.add_argument(
+        "input",
+        type=Path,
+        help="Path to the FITS file to inspect",
+    )
+
     # Subcommand: process
     process_parser = subparsers.add_parser(
         "process",
@@ -122,6 +148,139 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _format_file_size(file_size: int) -> str:
+    """Format a byte count for human-readable CLI output."""
+    if file_size < 1024:
+        return f"{file_size} B"
+
+    if file_size < 1024**2:
+        return f"{file_size / 1024:.2f} KB"
+
+    if file_size < 1024**3:
+        return f"{file_size / (1024**2):.2f} MB"
+
+    return f"{file_size / (1024**3):.2f} GB"
+
+
+def _handle_inventory(args: argparse.Namespace) -> int:
+    """Display products registered in the local inventory."""
+    inventory = LocalInventory()
+
+    try:
+        inventory.load()
+    except InventoryError as exc:
+        print(f"Inventory error: {exc}")
+        return 1
+
+    products = inventory.list_products()
+
+    if args.mission:
+        products = [
+            product
+            for product in products
+            if product.mission.upper() == args.mission.upper()
+        ]
+
+    if args.obs_id:
+        products = [
+            product
+            for product in products
+            if product.observation_id == args.obs_id
+        ]
+
+    print("Local Inventory")
+    print("=" * 80)
+
+    if not products:
+        print("No products found.")
+        return 0
+
+    print(f"Products: {len(products)}")
+    print()
+
+    for index, product in enumerate(products, start=1):
+        print(f"[{index}] {product.product_id}")
+        print(f"    Mission:     {product.mission}")
+        print(f"    Observation: {product.observation_id}")
+        print(f"    Filename:    {product.filename}")
+        print(f"    Size:        {_format_file_size(product.file_size)}")
+        print(f"    Path:        {product.local_path}")
+        print()
+
+    return 0
+
+
+def _handle_show(input_path: Path) -> int:
+    """Inspect a local FITS science product."""
+    print(f"Inspecting {input_path}...")
+    print()
+
+    try:
+        science_image = load_science_image(input_path)
+        stats = compute_statistics(science_image)
+
+    except ProcessingError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    header = science_image.header
+
+    print("Science Product")
+    print("=" * 60)
+
+    print(f"File:          {input_path}")
+    print(f"Shape:         {stats.shape}")
+    print(f"Datatype:      {science_image.data.dtype}")
+    print()
+
+    print("Observation Metadata")
+    print("-" * 60)
+
+    print(
+        f"Mission:       "
+        f"{header.get('TELESCOP', 'Unknown')}"
+    )
+    print(
+        f"Instrument:    "
+        f"{header.get('INSTRUME', 'Unknown')}"
+    )
+    print(
+        f"Filter:        "
+        f"{header.get('FILTER', 'Unknown')}"
+    )
+    print(
+        f"Observation:   "
+        f"{header.get('DATE-OBS', 'Unknown')}"
+    )
+    print(
+        f"Exposure:      "
+        f"{header.get('EXPTIME', 'Unknown')} s"
+    )
+
+    print()
+
+    print("Data Quality")
+    print("-" * 60)
+
+    print(f"Finite pixels: {stats.finite_pixels}")
+    print(f"Invalid pixels: {stats.nan_pixels}")
+
+    if stats.finite_pixels > 0:
+        print()
+        print("Signal Statistics")
+        print("-" * 60)
+
+        print(f"Minimum:       {stats.min_val:.6g}")
+        print(f"Maximum:       {stats.max_val:.6g}")
+        print(f"Mean:          {stats.mean_val:.6g}")
+        print(f"Median:        {stats.median_val:.6g}")
+        print(f"Std deviation: {stats.std_val:.6g}")
+
+    print()
+
+    return 0
+
+
 def main(args: Optional[List[str]] = None) -> int:
     """Execute the Astroscope command-line interface."""
     parser = build_parser()
@@ -130,6 +289,12 @@ def main(args: Optional[List[str]] = None) -> int:
     if parsed_args.command is None:
         parser.print_help()
         return 0
+
+    if parsed_args.command == "inventory":
+        return _handle_inventory(parsed_args)
+
+    if parsed_args.command == "show":
+        return _handle_show(parsed_args.input)
 
     if parsed_args.command == "ingest":
         if not parsed_args.product_id:
@@ -151,7 +316,9 @@ def main(args: Optional[List[str]] = None) -> int:
         adapter = HubbleAdapter()
 
         try:
-            obs = adapter.get_observation_metadata(parsed_args.obs_id)
+            obs = adapter.get_observation_metadata(
+                parsed_args.obs_id
+            )
 
             if obs.mast_obsid is None:
                 print("Error: Observation has no mast_obsid.")
@@ -172,13 +339,19 @@ def main(args: Optional[List[str]] = None) -> int:
             if not target_product:
                 print(
                     f"Error: Product {parsed_args.product_id} "
-                    f"not found in observation {parsed_args.obs_id}."
+                    f"not found in observation "
+                    f"{parsed_args.obs_id}."
                 )
                 return 1
 
-            print(f"Ingesting {target_product.product_id}...")
+            print(
+                f"Ingesting {target_product.product_id}..."
+            )
 
-            path = ingest_product(target_product, obs)
+            path = ingest_product(
+                target_product,
+                obs,
+            )
 
             print(f"Saved to {path}")
             print("Ingestion complete.")
@@ -192,11 +365,17 @@ def main(args: Optional[List[str]] = None) -> int:
     if parsed_args.command == "process":
         input_path = Path(parsed_args.input)
 
-        print(f"Loading science image from {input_path}...")
+        print(
+            f"Loading science image from {input_path}..."
+        )
 
         try:
-            science_image = load_science_image(input_path)
-            stats = compute_statistics(science_image)
+            science_image = load_science_image(
+                input_path
+            )
+            stats = compute_statistics(
+                science_image
+            )
 
             print(
                 f"Mission: "
@@ -215,35 +394,66 @@ def main(args: Optional[List[str]] = None) -> int:
 
             print("Image Statistics:")
             print(f"  Shape: {stats.shape}")
-            print(f"  Finite pixels: {stats.finite_pixels}")
-            print(f"  NaN/Masked pixels: {stats.nan_pixels}")
+            print(
+                f"  Finite pixels: "
+                f"{stats.finite_pixels}"
+            )
+            print(
+                f"  NaN/Masked pixels: "
+                f"{stats.nan_pixels}"
+            )
 
             if stats.finite_pixels > 0:
-                print(f"  Min: {stats.min_val:.4g}")
-                print(f"  Max: {stats.max_val:.4g}")
-                print(f"  Mean: {stats.mean_val:.4g}")
-                print(f"  Median: {stats.median_val:.4g}")
-                print(f"  Std Dev: {stats.std_val:.4g}")
+                print(
+                    f"  Min: "
+                    f"{stats.min_val:.4g}"
+                )
+                print(
+                    f"  Max: "
+                    f"{stats.max_val:.4g}"
+                )
+                print(
+                    f"  Mean: "
+                    f"{stats.mean_val:.4g}"
+                )
+                print(
+                    f"  Median: "
+                    f"{stats.median_val:.4g}"
+                )
+                print(
+                    f"  Std Dev: "
+                    f"{stats.std_val:.4g}"
+                )
             else:
-                print("  No finite pixels found in the image.")
+                print(
+                    "  No finite pixels found in the image."
+                )
 
-            # Run the source-detection pipeline only when real image
-            # data is available. This preserves the existing CLI
-            # statistics contract used by the test suite.
-            if isinstance(science_image.data, np.ndarray):
+            if isinstance(
+                science_image.data,
+                np.ndarray,
+            ):
                 image = science_image.data
 
-                background = estimate_background(image)
-                noise = estimate_noise(image)
+                background = estimate_background(
+                    image
+                )
+                noise = estimate_noise(
+                    image
+                )
 
-                snr_map = build_snr_map(image)
+                snr_map = build_snr_map(
+                    image
+                )
 
                 detection_mask = create_detection_mask(
                     snr_map,
                     threshold=parsed_args.threshold,
                 )
 
-                labels, source_count = label_sources(detection_mask)
+                labels, source_count = label_sources(
+                    detection_mask
+                )
 
                 labels, filtered_count = filter_sources(
                     labels,
@@ -259,21 +469,24 @@ def main(args: Optional[List[str]] = None) -> int:
                     background=background,
                 )
 
-                # Optional aperture photometry.
                 if parsed_args.aperture_radius is not None:
-                    aperture_fluxes = measure_aperture_fluxes(
-                        image,
-                        sources,
-                        radius=parsed_args.aperture_radius,
-                        background=background,
+                    aperture_fluxes = (
+                        measure_aperture_fluxes(
+                            image,
+                            sources,
+                            radius=parsed_args.aperture_radius,
+                            background=background,
+                        )
                     )
 
-                    # Source is frozen, so create new Source instances
-                    # instead of modifying the existing objects.
                     sources = [
                         replace(
                             source,
-                            aperture_flux=aperture_fluxes[source.source_id],
+                            aperture_flux=(
+                                aperture_fluxes[
+                                    source.source_id
+                                ]
+                            ),
                         )
                         for source in sources
                     ]
@@ -281,8 +494,14 @@ def main(args: Optional[List[str]] = None) -> int:
                 print("-" * 40)
 
                 print("Processing:")
-                print(f"  Background: {background:.6f}")
-                print(f"  Noise: {noise:.6f}")
+                print(
+                    f"  Background: "
+                    f"{background:.6f}"
+                )
+                print(
+                    f"  Noise: "
+                    f"{noise:.6f}"
+                )
                 print(
                     f"  Detection threshold: "
                     f"{parsed_args.threshold:.2f}"
@@ -291,7 +510,10 @@ def main(args: Optional[List[str]] = None) -> int:
                     f"  Minimum source pixels: "
                     f"{parsed_args.min_pixels}"
                 )
-                print(f"  Detected sources: {len(sources)}")
+                print(
+                    f"  Detected sources: "
+                    f"{len(sources)}"
+                )
 
                 if parsed_args.aperture_radius is not None:
                     print(
@@ -314,7 +536,10 @@ def main(args: Optional[List[str]] = None) -> int:
                         f"SNR={source.peak_snr:6.2f}"
                     )
 
-                    if parsed_args.aperture_radius is not None:
+                    if (
+                        parsed_args.aperture_radius
+                        is not None
+                    ):
                         line += (
                             f", aperture_flux="
                             f"{source.aperture_flux:10.2f}"
@@ -330,7 +555,8 @@ def main(args: Optional[List[str]] = None) -> int:
 
                     print("-" * 40)
                     print(
-                        f"Catalog exported to {parsed_args.output}"
+                        f"Catalog exported to "
+                        f"{parsed_args.output}"
                     )
 
             return 0
@@ -343,9 +569,14 @@ def main(args: Optional[List[str]] = None) -> int:
             print(f"Error: {e}")
             return 1
 
-    if parsed_args.command in ("discover", "analyze", "candidates"):
+    if parsed_args.command in (
+        "discover",
+        "analyze",
+        "candidates",
+    ):
         print(
-            f"Astroscope: Command '{parsed_args.command}' "
+            f"Astroscope: Command "
+            f"'{parsed_args.command}' "
             "is not implemented yet in Session 1."
         )
         return 0
