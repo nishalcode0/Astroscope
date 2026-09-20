@@ -1,3 +1,4 @@
+
 """CLI entry point for Astroscope computational observatory."""
 
 import argparse
@@ -31,6 +32,10 @@ from astroscope.processing.detection import (
     label_sources,
 )
 from astroscope.processing.export import export_sources_csv
+from astroscope.processing.visualization import (
+    VisualizationError,
+    save_science_image_png,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,6 +103,19 @@ def build_parser() -> argparse.ArgumentParser:
         "input",
         type=Path,
         help="Path to the FITS file to inspect",
+    )
+    show_parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Generate a normalized PNG visualization of the science image",
+    )
+    show_parser.add_argument(
+        "--output",
+        type=Path,
+        help=(
+            "Optional output path for the visualization PNG. "
+            "Used only with --visualize."
+        ),
     )
 
     # Subcommand: process
@@ -210,7 +228,11 @@ def _handle_inventory(args: argparse.Namespace) -> int:
     return 0
 
 
-def _handle_show(input_path: Path) -> int:
+def _handle_show(
+    input_path: Path,
+    visualize: bool = False,
+    output_path: Optional[Path] = None,
+) -> int:
     """Inspect a local FITS science product."""
     print(f"Inspecting {input_path}...")
     print()
@@ -276,6 +298,30 @@ def _handle_show(input_path: Path) -> int:
         print(f"Median:        {stats.median_val:.6g}")
         print(f"Std deviation: {stats.std_val:.6g}")
 
+    if visualize:
+        print()
+        print("Visualization")
+        print("-" * 60)
+
+        if output_path is None:
+            output_path = (
+                Path("data")
+                / "processed"
+                / "visualizations"
+                / f"{input_path.stem}.png"
+            )
+
+        try:
+            saved_path = save_science_image_png(
+                science_image.data,
+                output_path,
+            )
+        except VisualizationError as exc:
+            print(f"Visualization error: {exc}")
+            return 1
+
+        print(f"PNG saved to:  {saved_path}")
+
     print()
 
     return 0
@@ -294,7 +340,11 @@ def main(args: Optional[List[str]] = None) -> int:
         return _handle_inventory(parsed_args)
 
     if parsed_args.command == "show":
-        return _handle_show(parsed_args.input)
+        return _handle_show(
+            parsed_args.input,
+            visualize=parsed_args.visualize,
+            output_path=parsed_args.output,
+        )
 
     if parsed_args.command == "ingest":
         if not parsed_args.product_id:
@@ -586,3 +636,4 @@ def main(args: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
