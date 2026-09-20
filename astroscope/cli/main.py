@@ -1,4 +1,3 @@
-
 """CLI entry point for Astroscope computational observatory."""
 
 import argparse
@@ -423,6 +422,7 @@ def main(args: Optional[List[str]] = None) -> int:
             science_image = load_science_image(
                 input_path
             )
+
             stats = compute_statistics(
                 science_image
             )
@@ -488,6 +488,7 @@ def main(args: Optional[List[str]] = None) -> int:
                 background = estimate_background(
                     image
                 )
+
                 noise = estimate_noise(
                     image
                 )
@@ -576,7 +577,7 @@ def main(args: Optional[List[str]] = None) -> int:
                 print("Source Catalog:")
 
                 for source in sources:
-                    line = (
+                    print(
                         f"Source {source.source_id:2d}: "
                         f"x={source.x_centroid:7.2f}, "
                         f"y={source.y_centroid:7.2f}, "
@@ -586,16 +587,25 @@ def main(args: Optional[List[str]] = None) -> int:
                         f"SNR={source.peak_snr:6.2f}"
                     )
 
+                    print(
+                        f"           "
+                        f"bbox={source.bbox_width}x"
+                        f"{source.bbox_height}, "
+                        f"compactness={source.compactness:.3f}, "
+                        f"elongation={source.elongation:.3f}, "
+                        f"edge_distance="
+                        f"{source.edge_distance:.2f}px"
+                    )
+
                     if (
                         parsed_args.aperture_radius
                         is not None
                     ):
-                        line += (
-                            f", aperture_flux="
+                        print(
+                            f"           "
+                            f"aperture_flux="
                             f"{source.aperture_flux:10.2f}"
                         )
-
-                    print(line)
 
                 if parsed_args.output is not None:
                     export_sources_csv(
@@ -636,4 +646,3 @@ def main(args: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

@@ -64,6 +64,11 @@ class Source:
     peak_snr: float
     background_subtracted_peak: float
     background_subtracted_flux: float
+    bbox_width: int = 0
+    bbox_height: int = 0
+    compactness: float = 0.0
+    elongation: float = 0.0
+    edge_distance: float = 0.0
 
     # Circular-aperture photometry measurement.
     # Default preserves compatibility with existing Source construction.

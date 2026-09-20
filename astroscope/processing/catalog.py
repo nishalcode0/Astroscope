@@ -6,6 +6,61 @@ from astroscope.processing.models import Source
 from astroscope.processing.photometry import aperture_flux
 
 
+def _measure_shape_properties(
+    x: np.ndarray,
+    y: np.ndarray,
+    image_shape: tuple[int, int],
+) -> tuple[int, int, float, float, float]:
+    """Measure geometric properties of a detected source."""
+
+    x_min = int(np.min(x))
+    x_max = int(np.max(x))
+    y_min = int(np.min(y))
+    y_max = int(np.max(y))
+
+    bbox_width = x_max - x_min + 1
+    bbox_height = y_max - y_min + 1
+
+    bbox_area = bbox_width * bbox_height
+    pixel_count = len(x)
+
+    compactness = (
+        float(pixel_count / bbox_area)
+        if bbox_area > 0
+        else 0.0
+    )
+
+    major_axis = max(bbox_width, bbox_height)
+    minor_axis = min(bbox_width, bbox_height)
+
+    elongation = (
+        float(major_axis / minor_axis)
+        if minor_axis > 0
+        else 0.0
+    )
+
+    height, width = image_shape
+
+    distances = (
+        x,
+        width - 1 - x,
+        y,
+        height - 1 - y,
+    )
+
+    edge_distance = float(
+        np.min(np.concatenate(distances))
+    )
+
+    return (
+        bbox_width,
+        bbox_height,
+        compactness,
+        elongation,
+        edge_distance,
+    )
+
+
 def measure_source(
     image: np.ndarray,
     snr_map: np.ndarray,
@@ -56,6 +111,18 @@ def measure_source(
         np.sum(y * corrected_values) / corrected_flux
     )
 
+    (
+        bbox_width,
+        bbox_height,
+        compactness,
+        elongation,
+        edge_distance,
+    ) = _measure_shape_properties(
+        x,
+        y,
+        image.shape,
+    )
+
     return Source(
         source_id=source_id,
         x_centroid=x_centroid,
@@ -66,6 +133,11 @@ def measure_source(
         peak_snr=float(np.max(snr_values)),
         background_subtracted_peak=float(np.max(corrected_values)),
         background_subtracted_flux=corrected_flux,
+        bbox_width=bbox_width,
+        bbox_height=bbox_height,
+        compactness=compactness,
+        elongation=elongation,
+        edge_distance=edge_distance,
     )
 
 
